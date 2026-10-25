@@ -19,9 +19,107 @@ PROJECT_OPTIONS = {
     "shorts downloader": "🎬 Shorts Downloader",
     "🎬 shorts downloader": "🎬 Shorts Downloader",
     "anime": "⛩️ Anime Downloader",
+    "anime downloader": "⛩️ Anime Downloader",
+    "⛩️ anime downloader": "⛩️ Anime Downloader",
     "feedback": "💬 Feedback",
-    "core": "⚡ Core System"
+    "💬 feedback": "💬 Feedback",
+    "core": "⚡ Core System",
+    "⚡ core system": "⚡ Core System"
 }
+
+
+def extract_concise_title(text: str, max_len: int = 60, max_words: int = 10) -> str:
+    """
+    Extracts a concise, key title (up to max_words / max_len chars) for the 'Name' property:
+    - Takes the first non-empty line.
+    - Strips leading bullet points or markdown symbols.
+    - Truncates neatly at word boundaries with ellipsis '...' if it exceeds limits.
+    """
+    if not text:
+        return "Нове завдання"
+
+    clean_lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
+    if not clean_lines:
+        return "Нове завдання"
+
+    first_line = clean_lines[0]
+    first_line = re.sub(r"^[#\-\*\s]+", "", first_line).strip()
+
+    words = first_line.split()
+    if len(first_line) <= max_len and len(words) <= max_words:
+        return first_line
+
+    truncated = words[:max_words]
+    candidate = " ".join(truncated)
+    if len(candidate) > max_len:
+        candidate = candidate[:max_len].rsplit(" ", 1)[0]
+
+    return candidate.rstrip(".,;:- ") + "..."
+
+
+def build_text_blocks(text: str) -> List[Dict[str, Any]]:
+    """
+    Generates paragraph blocks for full page content without truncating text.
+    Handles Notion API's 2000 character limit per rich_text item by chunking safely.
+    """
+    if not text:
+        return []
+
+    blocks = []
+    paragraphs = text.split("\n\n")
+
+    for para in paragraphs:
+        cleaned = para.strip()
+        if not cleaned:
+            continue
+
+        while cleaned:
+            chunk = cleaned[:1900]
+            cleaned = cleaned[1900:]
+            blocks.append({
+                "object": "block",
+                "type": "paragraph",
+                "paragraph": {
+                    "rich_text": [
+                        {
+                            "type": "text",
+                            "text": {"content": chunk}
+                        }
+                    ]
+                }
+            })
+
+    return blocks
+
+
+def build_media_blocks(media_urls: Optional[List[str]]) -> List[Dict[str, Any]]:
+    """
+    Creates Notion image/video blocks from URLs.
+    """
+    if not media_urls:
+        return []
+
+    blocks = []
+    for url in media_urls:
+        if not url or not isinstance(url, str):
+            continue
+        u = url.strip()
+        if not u:
+            continue
+
+        is_video = any(u.lower().endswith(ext) for ext in [".mp4", ".mov", ".m4v", ".webm", ".avi"])
+        block_type = "video" if is_video else "image"
+
+        blocks.append({
+            "object": "block",
+            "type": block_type,
+            block_type: {
+                "type": "external",
+                "external": {"url": u}
+            }
+        })
+
+    return blocks
 
 
 def send_task(
@@ -31,11 +129,15 @@ def send_task(
     project: Optional[str] = "🎬 Shorts Downloader",
     rice_score: Optional[float] = None,
     description: Optional[str] = None,
+    media_urls: Optional[List[str]] = None,
     token: Optional[str] = None,
     database_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Creates and sends a task to the Notion database.
+    - name: concise title for the 'Name' property (title).
+    - description: full, untruncated content placed inside page body.
+    - media_urls: optional list of photo/video URLs placed as media blocks.
     """
     api_token = (token or os.getenv("NOTION_TOKEN") or "").strip() or NOTION_TOKEN
     target_db_id = (database_id or os.getenv("NOTION_DATABASE_ID") or "").strip() or DATABASE_ID
@@ -45,12 +147,15 @@ def send_task(
     if not target_db_id or target_db_id == "your_database_id_here":
         raise ValueError("Відсутній ідентифікатор бази NOTION_DATABASE_ID у змінних оточення.")
 
+    # Concise title for Name property (max 2000 per Notion spec, recommended <= 60-100)
+    final_title = extract_concise_title(name, max_len=80, max_words=12)
+
     properties: Dict[str, Any] = {
         "Name": {
             "title": [
                 {
                     "type": "text",
-                    "text": {"content": name[:2000]}
+                    "text": {"content": final_title}
                 }
             ]
         }
@@ -63,7 +168,6 @@ def send_task(
         properties["Type"] = {"select": {"name": task_type}}
 
     if project:
-        # Standardize project names if short alias is given
         clean_proj = PROJECT_OPTIONS.get(project.lower(), project)
         properties["Project"] = {"select": {"name": clean_proj}}
 
@@ -73,6 +177,16 @@ def send_task(
         except (ValueError, TypeError):
             pass
 
+    children_blocks: List[Dict[str, Any]] = []
+
+    # 1. Full description inside page body without truncation
+    if description:
+        children_blocks.extend(build_text_blocks(description))
+
+    # 2. Photos / media blocks
+    if media_urls:
+        children_blocks.extend(build_media_blocks(media_urls))
+
     payload: Dict[str, Any] = {
         "parent": {
             "database_id": target_db_id
@@ -80,45 +194,49 @@ def send_task(
         "properties": properties
     }
 
-    if description:
-        payload["children"] = [
-            {
-                "object": "block",
-                "type": "paragraph",
-                "paragraph": {
-                    "rich_text": [
-                        {
-                            "type": "text",
-                            "text": {"content": description[:2000]}
-                        }
-                    ]
-                }
-            }
-        ]
+    if children_blocks:
+        payload["children"] = children_blocks
 
-    req = urllib.request.Request(
-        "https://api.notion.com/v1/pages",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_token}",
-            "Content-Type": "application/json",
-            "Notion-Version": NOTION_API_VERSION,
-            "User-Agent": "NotionTasksClient/1.0"
-        },
-        method="POST"
-    )
+    def _execute_request(req_payload):
+        req = urllib.request.Request(
+            "https://api.notion.com/v1/pages",
+            data=json.dumps(req_payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {api_token}",
+                "Content-Type": "application/json",
+                "Notion-Version": NOTION_API_VERSION,
+                "User-Agent": "NotionTasksClient/1.0"
+            },
+            method="POST"
+        )
+        with urllib.request.urlopen(req) as resp:
+            return json.loads(resp.read().decode("utf-8"))
 
     try:
-        with urllib.request.urlopen(req) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            return {
-                "success": True,
-                "task_id": data.get("id"),
-                "url": data.get("url"),
-                "data": data
-            }
+        data = _execute_request(payload)
+        return {
+            "success": True,
+            "task_id": data.get("id"),
+            "url": data.get("url"),
+            "data": data
+        }
     except urllib.error.HTTPError as err:
         err_msg = err.read().decode("utf-8")
+        # Fallback: if media blocks failed (e.g., Notion rejected external URL format),
+        # retry by appending media links inside text blocks instead
+        if media_urls and ("image" in err_msg.lower() or "video" in err_msg.lower() or "external" in err_msg.lower()):
+            fallback_text = (description or "") + "\n\n📎 Прикріплені медіа:\n" + "\n".join(media_urls)
+            payload["children"] = build_text_blocks(fallback_text)
+            try:
+                data = _execute_request(payload)
+                return {
+                    "success": True,
+                    "task_id": data.get("id"),
+                    "url": data.get("url"),
+                    "data": data
+                }
+            except Exception:
+                pass
         raise RuntimeError(f"Notion API error [{err.code}]: {err_msg}")
     except Exception as err:
         raise RuntimeError(f"Failed to send task to Notion: {err}")
@@ -245,7 +363,9 @@ def parse_task_prefix(text: str) -> Optional[Dict[str, Any]]:
     - 'Бах — —', 'бах --', 'бах - -' -> Type='Bug', Priority='High'
     - 'ідея —', 'ідея -' -> Type='Idea'
     - 'думка —', 'думка -' -> Type='Fix' or 'Feature'
-    Returns parsed dictionary or None if prefix doesn't match.
+    Returns parsed dictionary with:
+    - 'title': concise title for 'Name' property (up to 7-10 words / 60 chars)
+    - 'description': full untruncated content for page body
     """
     if not text or not isinstance(text, str):
         return None
@@ -253,17 +373,18 @@ def parse_task_prefix(text: str) -> Optional[Dict[str, Any]]:
     stripped = text.strip()
     norm = stripped.replace("—", "-").replace("–", "-")
 
-    # 1. Match 'Бах - -' або 'Бах --' або 'Бах -' або 'Бах — —'
+    # 1. Match 'Бах - -' або 'Бах --' або 'Бах -'
     match_bug = re.match(r"^(?:бах|пах)\s*(?:-\s*)+(.+)$", norm, re.IGNORECASE | re.DOTALL)
     if match_bug:
         clean = match_bug.group(1).strip()
-        first_line = clean.split("\n", 1)[0].strip()
-        desc = f"⚠️ Priority: High\n\nOriginal text:\n{stripped}"
+        title = extract_concise_title(clean, max_len=60, max_words=10)
+        desc = f"⚠️ **Priority: High**\n\n{clean}"
         return {
             "type": "Bug",
-            "title": first_line if first_line else clean,
-            "rice_score": 90.0,
+            "title": title,
+            "rice_score": 120.0,
             "description": desc,
+            "raw_text": clean,
             "priority": "High"
         }
 
@@ -271,13 +392,14 @@ def parse_task_prefix(text: str) -> Optional[Dict[str, Any]]:
     match_idea = re.match(r"^(?:ідея|идея|idea)\s*(?:-\s*)+(.+)$", norm, re.IGNORECASE | re.DOTALL)
     if match_idea:
         clean = match_idea.group(1).strip()
-        first_line = clean.split("\n", 1)[0].strip()
-        desc = f"💡 Idea description:\n{stripped}"
+        title = extract_concise_title(clean, max_len=60, max_words=10)
+        desc = f"💡 **Idea:**\n\n{clean}"
         return {
             "type": "Idea",
-            "title": first_line if first_line else clean,
+            "title": title,
             "rice_score": 50.0,
             "description": desc,
+            "raw_text": clean,
             "priority": "Medium"
         }
 
@@ -285,18 +407,19 @@ def parse_task_prefix(text: str) -> Optional[Dict[str, Any]]:
     match_thought = re.match(r"^(?:думка|мысль|thought)\s*(?:-\s*)+(.+)$", norm, re.IGNORECASE | re.DOTALL)
     if match_thought:
         clean = match_thought.group(1).strip()
-        first_line = clean.split("\n", 1)[0].strip()
+        title = extract_concise_title(clean, max_len=60, max_words=10)
 
         fix_keywords = ["фікс", "виправ", "поправ", "баг", "помилк", "лаг", "глюк", "криво", "fix", "bug"]
         is_fix = any(k in clean.lower() for k in fix_keywords)
         task_type = "Fix" if is_fix else "Feature"
 
-        desc = f"💭 Thought / Feedback:\n{stripped}"
+        desc = f"💭 **{task_type} Thought:**\n\n{clean}"
         return {
             "type": task_type,
-            "title": first_line if first_line else clean,
-            "rice_score": 60.0,
+            "title": title,
+            "rice_score": 60.0 if is_fix else 45.0,
             "description": desc,
+            "raw_text": clean,
             "priority": "Medium"
         }
 
@@ -307,6 +430,7 @@ def triage_with_llm(raw_text: str, project: Optional[str] = None) -> Dict[str, A
     """
     Triages raw text via LLM (OpenAI / Gemini if API key available)
     or falls back to deterministic NLP heuristic.
+    Generates a concise title (<= 60 chars) and preserves the full text for description.
     """
     openai_key = os.getenv("OPENAI_API_KEY")
 
@@ -316,10 +440,10 @@ def triage_with_llm(raw_text: str, project: Optional[str] = None) -> Dict[str, A
                 "You are an agile triage assistant. Analyze this raw user task/idea/feedback message:\n"
                 f"'''{raw_text}'''\n\n"
                 "Extract structured task information in JSON format with fields:\n"
-                "- title: concise, clear title in the original language (max 80 chars)\n"
+                "- title: concise, punchy title summarizing the task (up to 7-10 words, max 60 chars) in the original language\n"
                 "- type: one of exactly ['Bug', 'Feature', 'Fix', 'Idea']\n"
                 "- rice_score: estimated number (e.g. between 10 and 200)\n"
-                "- description: well-formulated description in the original language\n"
+                "- description: well-formulated, full description in the original language preserving all details\n"
                 "Respond ONLY with valid JSON."
             )
             req = urllib.request.Request(
@@ -344,7 +468,7 @@ def triage_with_llm(raw_text: str, project: Optional[str] = None) -> Dict[str, A
                 if t_type not in ["Bug", "Feature", "Fix", "Idea"]:
                     t_type = "Idea"
                 return {
-                    "title": parsed.get("title", raw_text[:80]),
+                    "title": extract_concise_title(parsed.get("title", ""), max_len=60, max_words=10),
                     "type": t_type,
                     "rice_score": float(parsed.get("rice_score", 50.0)),
                     "description": parsed.get("description", raw_text)
@@ -361,9 +485,7 @@ def triage_with_llm(raw_text: str, project: Optional[str] = None) -> Dict[str, A
             "description": prefix_data.get("description", raw_text)
         }
 
-    lines = raw_text.strip().split("\n")
-    first_line = lines[0].strip()
-    title = first_line[:80]
+    title = extract_concise_title(raw_text, max_len=60, max_words=10)
 
     lower = raw_text.lower()
     if any(k in lower for k in ["помилк", "error", "fail", "падає", "краш", "не робить", "не працює"]):
@@ -380,8 +502,8 @@ def triage_with_llm(raw_text: str, project: Optional[str] = None) -> Dict[str, A
         score = 40.0
 
     return {
-        "title": title if title else "Новий відгук / ідея",
+        "title": title,
         "type": task_type,
         "rice_score": score,
-        "description": f"Оригінальне повідомлення:\n{raw_text}"
+        "description": f"Оригінальне повідомлення:\n\n{raw_text}"
     }
