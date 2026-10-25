@@ -15,9 +15,9 @@ DATABASE_ID = (os.getenv("NOTION_DATABASE_ID") or "").strip() or "404002e3-147b-
 NOTION_API_VERSION = "2022-06-28"
 
 PROJECT_OPTIONS = {
-    "shorts": "Shorts Downloader",
-    "shorts downloader": "Shorts Downloader",
-    "🎬 shorts downloader": "Shorts Downloader",
+    "shorts": "🎬 Shorts Downloader",
+    "shorts downloader": "🎬 Shorts Downloader",
+    "🎬 shorts downloader": "🎬 Shorts Downloader",
     "anime": "⛩️ Anime Downloader",
     "feedback": "💬 Feedback",
     "core": "⚡ Core System"
@@ -28,7 +28,7 @@ def send_task(
     name: str,
     status: Optional[str] = "Inbox",
     task_type: Optional[str] = None,
-    project: Optional[str] = None,
+    project: Optional[str] = "🎬 Shorts Downloader",
     rice_score: Optional[float] = None,
     description: Optional[str] = None,
     token: Optional[str] = None,

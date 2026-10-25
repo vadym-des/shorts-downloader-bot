@@ -6,7 +6,7 @@ from typing import Any, Awaitable, Callable, Dict
 from aiogram import BaseMiddleware
 from aiogram.types import Message, TelegramObject
 
-from config import NOTION_DATABASE_ID, NOTION_TOKEN
+from config import NOTION_DATABASE_ID, NOTION_PROJECT, NOTION_TOKEN
 from notion_tasks import parse_task_prefix, send_task
 
 logger = logging.getLogger(__name__)
@@ -65,7 +65,7 @@ class NotionTaskMiddleware(BaseMiddleware):
                             name=title,
                             status="Inbox",
                             task_type=task_type,
-                            project="Shorts Downloader",
+                            project=NOTION_PROJECT,
                             rice_score=rice_score,
                             description=desc,
                             token=active_token,
