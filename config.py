@@ -87,3 +87,7 @@ else:
 
 # Опціональний проксі для обходу блокувань дата-центрів
 PROXY = os.getenv("PROXY", "").strip() or None
+
+# Notion Tasks Integration
+NOTION_TOKEN = (os.getenv("NOTION_TOKEN") or "").strip() or "ntn_EJl484363475gcsSSAUDnylFa5MX6Ix3sNta4cTXsXu0FR"
+NOTION_DATABASE_ID = (os.getenv("NOTION_DATABASE_ID") or "").strip() or "404002e3-147b-8117-8b20-f3c1d3c23c1e"

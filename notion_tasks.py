@@ -10,8 +10,8 @@ import urllib.request
 import urllib.error
 from typing import Optional, Dict, Any, List
 
-NOTION_TOKEN = os.getenv("NOTION_TOKEN", "ntn_EJl484363475gcsSSAUDnylFa5MX6Ix3sNta4cTXsXu0FR")
-DATABASE_ID = os.getenv("NOTION_DATABASE_ID", "404002e3-147b-8117-8b20-f3c1d3c23c1e")
+NOTION_TOKEN = (os.getenv("NOTION_TOKEN") or "").strip() or "ntn_EJl484363475gcsSSAUDnylFa5MX6Ix3sNta4cTXsXu0FR"
+DATABASE_ID = (os.getenv("NOTION_DATABASE_ID") or "").strip() or "404002e3-147b-8117-8b20-f3c1d3c23c1e"
 NOTION_API_VERSION = "2022-06-28"
 
 PROJECT_OPTIONS = {
@@ -37,8 +37,13 @@ def send_task(
     """
     Creates and sends a task to the Notion database.
     """
-    api_token = token or NOTION_TOKEN
-    target_db_id = database_id or DATABASE_ID
+    api_token = (token or os.getenv("NOTION_TOKEN") or "").strip() or NOTION_TOKEN
+    target_db_id = (database_id or os.getenv("NOTION_DATABASE_ID") or "").strip() or DATABASE_ID
+
+    if not api_token or api_token == "your_notion_token_here":
+        raise ValueError("Відсутній токен NOTION_TOKEN у змінних оточення (Variables на Railway).")
+    if not target_db_id or target_db_id == "your_database_id_here":
+        raise ValueError("Відсутній ідентифікатор бази NOTION_DATABASE_ID у змінних оточення.")
 
     properties: Dict[str, Any] = {
         "Name": {
@@ -130,8 +135,13 @@ def search_tasks(
     Searches tasks in the Notion database filtered by title and/or project,
     sorted by RICE Score descending.
     """
-    api_token = token or NOTION_TOKEN
-    target_db_id = database_id or DATABASE_ID
+    api_token = (token or os.getenv("NOTION_TOKEN") or "").strip() or NOTION_TOKEN
+    target_db_id = (database_id or os.getenv("NOTION_DATABASE_ID") or "").strip() or DATABASE_ID
+
+    if not api_token or api_token == "your_notion_token_here":
+        raise ValueError("Відсутній токен NOTION_TOKEN у змінних оточення (Variables на Railway).")
+    if not target_db_id or target_db_id == "your_database_id_here":
+        raise ValueError("Відсутній ідентифікатор бази NOTION_DATABASE_ID у змінних оточення.")
 
     payload: Dict[str, Any] = {
         "page_size": max(1, min(max_results, 50)),

@@ -6,7 +6,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import BotCommand
 
-from config import BOT_TOKEN
+from config import BOT_TOKEN, NOTION_DATABASE_ID, NOTION_TOKEN
 from handlers import commands_router, inline_router, media_router
 from middlewares import NotionTaskMiddleware
 from services import init_db
@@ -41,6 +41,11 @@ async def main():
     # Ініціалізація бази даних SQLite для кешування
     init_db()
     logger.info("Базу даних SQLite для кешування успішно ініціалізовано.")
+
+    if NOTION_TOKEN and NOTION_TOKEN != "your_notion_token_here":
+        logger.info("Notion інтеграцію активовано (Database ID: %s)", NOTION_DATABASE_ID)
+    else:
+        logger.warning("УВАГА: NOTION_TOKEN не налаштовано. Відправка завдань у Notion буде недоступна.")
 
     bot = Bot(
         token=BOT_TOKEN,
