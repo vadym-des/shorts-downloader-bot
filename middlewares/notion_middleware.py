@@ -7,7 +7,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import Message, TelegramObject
 
 from config import NOTION_DATABASE_ID, NOTION_PROJECT, NOTION_TOKEN
-from notion_tasks import parse_task_prefix, send_task
+from notion_tasks import extract_concise_title, parse_task_prefix, send_task
 
 logger = logging.getLogger(__name__)
 
@@ -43,33 +43,38 @@ class NotionTaskMiddleware(BaseMiddleware):
                         rice_score = task_info.get("rice_score")
                         desc = task_info.get("description")
 
-                        # Збір медіафайлів (фото / відео)
+                        # Стислий заголовок для картки і повідомлення (<= 60 символів / 8 слів)
+                        concise_title = extract_concise_title(title, max_len=60, max_words=8)
+
+                        # Збір медіафайлів (фото / відео / документи)
                         media_urls: List[str] = []
-                        bot = event.bot
+                        bot = event.bot or data.get("bot")
 
-                        if event.photo and bot:
-                            try:
-                                best_photo = event.photo[-1]
-                                file_info = await bot.get_file(best_photo.file_id)
-                                if file_info.file_path:
-                                    photo_url = f"https://api.telegram.org/file/bot{bot.token}/{file_info.file_path}"
-                                    media_urls.append(photo_url)
-                            except Exception as photo_err:
-                                logger.warning("Не вдалося отримати URL фото: %s", photo_err)
+                        if bot:
+                            file_id = None
+                            if event.photo:
+                                file_id = event.photo[-1].file_id
+                            elif event.video:
+                                file_id = event.video.file_id
+                            elif event.document and event.document.mime_type and (
+                                event.document.mime_type.startswith("image/") or event.document.mime_type.startswith("video/")
+                            ):
+                                file_id = event.document.file_id
 
-                        elif event.video and bot:
-                            try:
-                                file_info = await bot.get_file(event.video.file_id)
-                                if file_info.file_path:
-                                    video_url = f"https://api.telegram.org/file/bot{bot.token}/{file_info.file_path}"
-                                    media_urls.append(video_url)
-                            except Exception as video_err:
-                                logger.warning("Не вдалося отримати URL відео: %s", video_err)
+                            if file_id:
+                                try:
+                                    file_info = await bot.get_file(file_id)
+                                    if file_info.file_path:
+                                        media_url = f"https://api.telegram.org/file/bot{bot.token}/{file_info.file_path}"
+                                        media_urls.append(media_url)
+                                except Exception as media_err:
+                                    logger.warning("Не вдалося отримати URL медіафайлу: %s", media_err)
 
                         logger.info(
-                            "Перехоплено повідомлення для Notion: [%s] '%s' (RICE: %s, Media: %d)",
+                            "Перехоплено повідомлення для Notion: [%s] '%s' (Concise: '%s', RICE: %s, Media: %d)",
                             task_type,
                             title,
+                            concise_title,
                             rice_score,
                             len(media_urls)
                         )
@@ -91,7 +96,7 @@ class NotionTaskMiddleware(BaseMiddleware):
                         try:
                             await asyncio.to_thread(
                                 send_task,
-                                name=title,
+                                name=concise_title,
                                 status="Inbox",
                                 task_type=task_type,
                                 project=active_project,
@@ -101,9 +106,11 @@ class NotionTaskMiddleware(BaseMiddleware):
                                 token=active_token,
                                 database_id=active_db,
                             )
-                            safe_title = html.escape(title)
-                            media_badge = " 📸" if media_urls else ""
-                            await event.reply(f"⚡ Завдання додано в Notion Inbox: <b>{safe_title}</b>{media_badge}", parse_mode="HTML")
+                            safe_title = html.escape(concise_title)
+                            try:
+                                await event.reply(f"⚡ Завдання додано в Notion Inbox: <b>{safe_title}</b>", parse_mode="HTML")
+                            except Exception:
+                                await event.reply(f"⚡ Завдання додано в Notion Inbox: {concise_title}", parse_mode=None)
                             return
                         except Exception as e:
                             logger.error("Помилка при створенні картки в Notion: %s", e, exc_info=True)

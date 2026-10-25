@@ -28,31 +28,42 @@ PROJECT_OPTIONS = {
 }
 
 
-def extract_concise_title(text: str, max_len: int = 60, max_words: int = 10) -> str:
+def extract_concise_title(text: str, max_len: int = 60, max_words: int = 8) -> str:
     """
     Extracts a concise, key title (up to max_words / max_len chars) for the 'Name' property:
     - Takes the first non-empty line.
     - Strips leading bullet points or markdown symbols.
-    - Truncates neatly at word boundaries with ellipsis '...' if it exceeds limits.
+    - If longer than max_len chars or more than max_words words:
+      truncates neatly along word boundary (to 55-60 chars) and appends '...'.
     """
     if not text:
         return "Нове завдання"
 
-    clean_lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
+    clean_lines = [l.strip() for l in str(text).strip().splitlines() if l.strip()]
     if not clean_lines:
         return "Нове завдання"
 
     first_line = clean_lines[0]
     first_line = re.sub(r"^[#\-\*\s]+", "", first_line).strip()
-
     words = first_line.split()
+
+    if not words:
+        return "Нове завдання"
+
+    # If within limits (<= max_len and <= max_words), return as is
     if len(first_line) <= max_len and len(words) <= max_words:
         return first_line
 
+    # Truncate to at most max_words
     truncated = words[:max_words]
     candidate = " ".join(truncated)
-    if len(candidate) > max_len:
-        candidate = candidate[:max_len].rsplit(" ", 1)[0]
+
+    # Ensure candidate + '...' fits within max_len (e.g. 60 chars)
+    limit = max_len - 3
+    if len(candidate) > limit:
+        candidate = candidate[:limit]
+        if " " in candidate:
+            candidate = candidate.rsplit(" ", 1)[0]
 
     return candidate.rstrip(".,;:- ") + "..."
 
@@ -147,8 +158,8 @@ def send_task(
     if not target_db_id or target_db_id == "your_database_id_here":
         raise ValueError("Відсутній ідентифікатор бази NOTION_DATABASE_ID у змінних оточення.")
 
-    # Concise title for Name property (max 2000 per Notion spec, recommended <= 60-100)
-    final_title = extract_concise_title(name, max_len=80, max_words=12)
+    # Concise title for Name property (<= 60 chars / 8 words)
+    final_title = extract_concise_title(name, max_len=60, max_words=8)
 
     properties: Dict[str, Any] = {
         "Name": {
@@ -180,8 +191,9 @@ def send_task(
     children_blocks: List[Dict[str, Any]] = []
 
     # 1. Full description inside page body without truncation
-    if description:
-        children_blocks.extend(build_text_blocks(description))
+    full_body = description if description else name
+    if full_body:
+        children_blocks.extend(build_text_blocks(full_body))
 
     # 2. Photos / media blocks
     if media_urls:
