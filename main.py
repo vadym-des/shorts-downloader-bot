@@ -8,6 +8,7 @@ from aiogram.types import BotCommand
 
 from config import BOT_TOKEN
 from handlers import commands_router, inline_router, media_router
+from middlewares import NotionTaskMiddleware
 from services import init_db
 
 logging.basicConfig(
@@ -46,6 +47,9 @@ async def main():
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
     dp = Dispatcher()
+
+    # Глобальний middleware для перехоплення завдань у Notion на найвищому рівні
+    dp.message.outer_middleware(NotionTaskMiddleware())
 
     # Реєстрація роутерів
     dp.include_router(commands_router)
