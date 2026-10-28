@@ -28,42 +28,31 @@ PROJECT_OPTIONS = {
 }
 
 
-def extract_concise_title(text: str, max_len: int = 60, max_words: int = 8) -> str:
+def extract_concise_title(text: str, max_len: int = 60, max_words: int = 10) -> str:
     """
     Extracts a concise, key title (up to max_words / max_len chars) for the 'Name' property:
     - Takes the first non-empty line.
     - Strips leading bullet points or markdown symbols.
-    - If longer than max_len chars or more than max_words words:
-      truncates neatly along word boundary (to 55-60 chars) and appends '...'.
+    - Truncates neatly at word boundaries with ellipsis '...' if it exceeds limits.
     """
     if not text:
         return "Нове завдання"
 
-    clean_lines = [l.strip() for l in str(text).strip().splitlines() if l.strip()]
+    clean_lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
     if not clean_lines:
         return "Нове завдання"
 
     first_line = clean_lines[0]
     first_line = re.sub(r"^[#\-\*\s]+", "", first_line).strip()
+
     words = first_line.split()
-
-    if not words:
-        return "Нове завдання"
-
-    # If within limits (<= max_len and <= max_words), return as is
     if len(first_line) <= max_len and len(words) <= max_words:
         return first_line
 
-    # Truncate to at most max_words
     truncated = words[:max_words]
     candidate = " ".join(truncated)
-
-    # Ensure candidate + '...' fits within max_len (e.g. 60 chars)
-    limit = max_len - 3
-    if len(candidate) > limit:
-        candidate = candidate[:limit]
-        if " " in candidate:
-            candidate = candidate.rsplit(" ", 1)[0]
+    if len(candidate) > max_len:
+        candidate = candidate[:max_len].rsplit(" ", 1)[0]
 
     return candidate.rstrip(".,;:- ") + "..."
 
@@ -106,6 +95,7 @@ def build_text_blocks(text: str) -> List[Dict[str, Any]]:
 def build_media_blocks(media_urls: Optional[List[str]]) -> List[Dict[str, Any]]:
     """
     Creates Notion image/video blocks from URLs.
+    For videos, embeds native video player AND adds a direct click-to-view/download link.
     """
     if not media_urls:
         return []
@@ -119,16 +109,48 @@ def build_media_blocks(media_urls: Optional[List[str]]) -> List[Dict[str, Any]]:
             continue
 
         is_video = any(u.lower().endswith(ext) for ext in [".mp4", ".mov", ".m4v", ".webm", ".avi"])
-        block_type = "video" if is_video else "image"
-
-        blocks.append({
-            "object": "block",
-            "type": block_type,
-            block_type: {
-                "type": "external",
-                "external": {"url": u}
-            }
-        })
+        
+        if is_video:
+            # 1. Native Notion video block
+            blocks.append({
+                "object": "block",
+                "type": "video",
+                "video": {
+                    "type": "external",
+                    "external": {"url": u}
+                }
+            })
+            # 2. Clickable link to view in full player or download directly
+            blocks.append({
+                "object": "block",
+                "type": "paragraph",
+                "paragraph": {
+                    "rich_text": [
+                        {
+                            "type": "text",
+                            "text": {
+                                "content": "▶️ Відкрити відео у новому вікні / Завантажити",
+                                "link": {"url": u}
+                            },
+                            "annotations": {
+                                "bold": True,
+                                "underline": True,
+                                "color": "blue"
+                            }
+                        }
+                    ]
+                }
+            })
+        else:
+            # Image block
+            blocks.append({
+                "object": "block",
+                "type": "image",
+                "image": {
+                    "type": "external",
+                    "external": {"url": u}
+                }
+            })
 
     return blocks
 
@@ -158,8 +180,8 @@ def send_task(
     if not target_db_id or target_db_id == "your_database_id_here":
         raise ValueError("Відсутній ідентифікатор бази NOTION_DATABASE_ID у змінних оточення.")
 
-    # Concise title for Name property (<= 60 chars / 8 words)
-    final_title = extract_concise_title(name, max_len=60, max_words=8)
+    # Concise title for Name property (max 2000 per Notion spec, recommended <= 60-100)
+    final_title = extract_concise_title(name, max_len=80, max_words=12)
 
     properties: Dict[str, Any] = {
         "Name": {
@@ -191,9 +213,8 @@ def send_task(
     children_blocks: List[Dict[str, Any]] = []
 
     # 1. Full description inside page body without truncation
-    full_body = description if description else name
-    if full_body:
-        children_blocks.extend(build_text_blocks(full_body))
+    if description:
+        children_blocks.extend(build_text_blocks(description))
 
     # 2. Photos / media blocks
     if media_urls:
