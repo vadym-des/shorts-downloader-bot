@@ -32,7 +32,8 @@ class NotionTaskMiddleware(BaseMiddleware):
 
                 if raw_text:
                     try:
-                        task_info = parse_task_prefix(raw_text)
+                        active_project = (os.getenv("NOTION_PROJECT") or "").strip() or NOTION_PROJECT
+                        task_info = parse_task_prefix(raw_text, project=active_project)
                     except Exception as e:
                         logger.error("Помилка парсингу тригера для Notion: %s", e)
                         task_info = None
